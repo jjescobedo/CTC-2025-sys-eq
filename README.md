@@ -1,0 +1,1 @@
+# CTC-2025-Systematic-Equities
