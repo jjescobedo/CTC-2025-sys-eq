@@ -144,7 +144,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Automated Market Maker for CTC API")
     parser.add_argument("--api-url", default=os.environ.get("CTC_API_URL", "http://localhost:8000"))
     parser.add_argument("--api-key", default=os.environ.get("CTC_API_KEY") or os.environ.get("X_API_KEY"))
-    parser.add_argument("--symbols", default="AAPL,MSFT,TSLA", help="Comma-separated list of symbols")
+    parser.add_argument("--symbols", default="AAA,BBB,CCC,ETF", help="Comma-separated list of symbols")
     parser.add_argument("--loop", action="store_true", help="Continuously place orders")
     return parser.parse_args()
 
