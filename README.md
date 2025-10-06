@@ -20,3 +20,7 @@
 3. After onboarding (create or join a team), go to the **Team** page.
 4. As a **team owner**, navigate to the **API Keys** section.
 5. Create a new key for your bot and **copy the key** when prompted.
+
+# Running the bot
+```python bot.py --api-url https://cornelltradingcompetition.org --api-key "API_KEY" --symbols AAA,BBB,CCC,ETF --loop```
+
