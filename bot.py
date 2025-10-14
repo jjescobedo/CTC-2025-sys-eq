@@ -11,6 +11,8 @@ import threading
 import queue
 import concurrent.futures
 import builtins
+import sys
+import select
 
 # ----------------------------
 # Helpers
@@ -173,38 +175,66 @@ def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) ->
 
 def input_worker(q: "queue.Queue[str]", stop_event: "threading.Event") -> None:
 	"""
-    text
+	Wait for stdin activity. If user presses Enter on an empty line -> open an explicit prompt:
+	  - enable print buffering (so background prints don't disrupt typing)
+	  - show prompt with original_print (so prompt isn't buffered)
+	  - read the command line, disable buffering, flush and queue command
+	If user types a non-empty line and hits Enter, treat it directly as a command.
 	"""
 	while not stop_event.is_set():
 		try:
-			# notify print manager that input is starting so other prints get buffered
-			if globals().get("print_manager") is not None:
-				globals()["print_manager"].set_input_active(True)
+			# wait up to 0.5s for stdin readability so we don't busy-loop
+			r, _, _ = select.select([sys.stdin], [], [], 0.5)
+			if not r:
+				continue
 
-			line = input("> ")
+			# read the available line (this consumes the newline)
+			line = sys.stdin.readline()
+			if line == "":
+				# EOF
+				q.put("exit")
+				break
 
-		except EOFError:
-			# ensure we clear input_active and flush
-			if globals().get("print_manager") is not None:
-				globals()["print_manager"].set_input_active(False)
-			q.put("exit")
-			break
+			# If user hit Enter without typing -> open interactive prompt
+			if line.strip() == "":
+				pm = globals().get("print_manager")
+				if pm is not None:
+					pm.set_input_active(True)
+
+				# show prompt using original_print (bypasses buffering)
+				if pm is not None:
+					pm.original_print("> ", end="", flush=True)
+				else:
+					# fallback
+					builtins.print("> ", end="", flush=True)
+
+				# read actual command (user types here)
+				cmd = sys.stdin.readline()
+				if cmd == "":
+					# EOF while in prompt
+					if pm is not None:
+						pm.set_input_active(False)
+					q.put("exit")
+					break
+
+				cmd = cmd.strip()
+
+				# turn off input buffering and flush buffered output
+				if pm is not None:
+					pm.set_input_active(False)
+
+				if cmd:
+					q.put(cmd)
+
+			else:
+				q.put(line.strip())
 
 		except Exception:
-			# ensure we clear input_active even on error
-			if globals().get("print_manager") is not None:
-				globals()["print_manager"].set_input_active(False)
+			# ensure buffering is disabled on unexpected error and keep loop alive
+			pm = globals().get("print_manager")
+			if pm is not None:
+				pm.set_input_active(False)
 			continue
-
-		# input finished: turn off input_active and flush buffered prints
-		if globals().get("print_manager") is not None:
-			globals()["print_manager"].set_input_active(False)
-
-		line = (line or "").strip()
-		if not line:
-			continue
-
-		q.put(line)
 
 # ----------------------------
 # Market-making logic
@@ -294,7 +324,6 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 	# initialize and activate print manager for the duration of the loop
 	global print_manager
 	print_manager = PrintManager()
-	# replace built-in print so all print(...) calls are routed through the manager
 	builtins.print = print_manager.print
 
 	fair = generate_fair_values(symbols)
@@ -420,15 +449,18 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 			for sym in symbols:
 				fair_value = fair[sym]
 				orders = make_bid_ask_orders(sym, fair_value)
+                        
 				for o in orders:
 					print(f"current order: {o}")
 					created = place_order(api_url, api_key, o)
+                              
 					if created:
 						order_id = created.get("order_id") or created.get("id")
 						if order_id:
 							submit_net(cancel_order, api_url, api_key, order_id)
 						else:
 							print("[ERR] place_order returned no order_id, cannot cancel")
+                                          
 					else:
 						print("[ERR] place_order failed, skipping cancel")
 
