@@ -343,6 +343,8 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 	
 	def handle_command(line: str) -> bool:
 		"""
+		Press enter in terminal during runtime to activate cursor, to type command
+		
 		Supported commands:
 		  - help
 		  - exit
