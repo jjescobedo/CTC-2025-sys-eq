@@ -8,6 +8,10 @@ from typing import Any, Optional, Union
 import requests
 
 import threading
+import queue
+import concurrent.futures
+import builtins
+from typing import List
 
 # ----------------------------
 # Helpers
@@ -56,7 +60,7 @@ def place_order(api_url: str, api_key: str, order: dict[str, Any]) -> Optional[d
             f"[OK] {order['side'].upper():4} {order['symbol']:5} "
             f"{order['quantity']:>3} @ {order.get('price', 'MKT')} ({order['order_type']})"
         )
-        return res
+        return res # added dis to get order id
     except Exception as e:
         print(f"[ERR] Failed order for {order['symbol']}: {e}")
         return None
@@ -168,6 +172,40 @@ def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) ->
         
         _cancel_list(data.get("orders", []))
 
+def input_worker(q: "queue.Queue[str]", stop_event: "threading.Event") -> None:
+	"""
+	"""
+	while not stop_event.is_set():
+		try:
+			# notify print manager that input is starting so other prints get buffered
+			if globals().get("print_manager") is not None:
+				globals()["print_manager"].set_input_active(True)
+
+			line = input("> ")
+
+		except EOFError:
+			# ensure we clear input_active and flush
+			if globals().get("print_manager") is not None:
+				globals()["print_manager"].set_input_active(False)
+			q.put("exit")
+			break
+
+		except Exception:
+			# ensure we clear input_active even on error
+			if globals().get("print_manager") is not None:
+				globals()["print_manager"].set_input_active(False)
+			continue
+
+		# input finished: turn off input_active and flush buffered prints
+		if globals().get("print_manager") is not None:
+			globals()["print_manager"].set_input_active(False)
+
+		line = (line or "").strip()
+		if not line:
+			continue
+
+		q.put(line)
+
 # ----------------------------
 # Market-making logic
 # ----------------------------
@@ -253,32 +291,199 @@ def check_ETF_discrepancy(expected_ETF_value: float, actual_ETF_value: float, sp
 # Main trading loop
 # ----------------------------
 def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: bool = True):
-    fair = generate_fair_values(symbols)
-    print("Initial fair values:", fair)
+	# initialize and activate print manager for the duration of the loop
+	global print_manager
+	print_manager = PrintManager()
+	# replace built-in print so all print(...) calls are routed through the manager
+	builtins.print = print_manager.print
 
-    while True:
-        # figure a way to queue terminal input?
-        update_fair_values(fair, drift_std=0.3)
-        # if (discrepancy := check_ETF_discrepancy()):
-        #   if discrepancy[0] == "long":
-        #       execute_order()
-        #   else:
-        #       execute_different_order()
-        for sym in symbols:
-            fair_value = fair[sym]
-            orders = make_bid_ask_orders(sym, fair_value)
-            for o in orders:
-                print(f"current order: {o}")
-                created = place_order(api_url, api_key, o)
-                cancel_order(api_url, api_key, created.get("order_id"))
-            print(f"[{sym}] fair={fair_value:.2f}\n")
-            time.sleep(0.5)
+	fair = generate_fair_values(symbols)
+	print("Initial fair values:", fair)
 
-        if not loop:
-            break
+	cmd_q: "queue.Queue[str]" = queue.Queue()
+	stop_event = threading.Event()
+	executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-        time.sleep(1)
+	globals()["unique_weight"] = globals().get("unique_weight", 1.0)
 
+	input_thread = threading.Thread(target=input_worker, args=(cmd_q, stop_event), daemon=True)
+	input_thread.start()
+
+	def submit_net(fn, *a, **kw):
+		return executor.submit(fn, *a, **kw)
+	
+	def handle_command(line: str) -> bool:
+		"""
+		Supported commands:
+		  - help
+		  - exit
+		  - list
+		  - list_open [SYMBOL]
+		  - cancel ORDER_ID
+		  - cancel_all [SYMBOL]
+		  - place SYMBOL SIDE QTY [PRICE]
+		  - setweight VALUE
+
+		Return `True` to continue loop, `False` to stop.
+		"""
+		parts = line.split()
+		cmd = parts[0].lower()
+		try:
+			if cmd == "help":
+				print(
+					"commands: help, exit, list, list_open [SYMBOL], "
+					"cancel ORDER_ID, cancel_all [SYMBOL], place SYMBOL SIDE QTY [PRICE], setweight VALUE"
+				)
+
+			elif cmd == "exit":
+				print("Exiting on user request...")
+				return False
+			
+			elif cmd == "list":
+				submit_net(list_symbols, api_url, api_key)
+
+			elif cmd == "list_open":
+				sym = parts[1].upper() if len(parts) > 1 else None
+				submit_net(list_open_orders, api_url, api_key, sym)
+
+			elif cmd == "cancel":
+				if len(parts) < 2:
+					print("Usage: cancel ORDER_ID")
+
+				else:
+					order_id = parts[1]
+					submit_net(cancel_order, api_url, api_key, order_id)
+			
+			elif cmd == "cancel_all":
+				if len(parts) > 1:
+					syms = [s.strip().upper() for s in parts[1].split(",") if s.strip()]
+					submit_net(cancel_all_orders, api_url, api_key, syms)
+				
+				else:
+					submit_net(cancel_all_orders, api_url, api_key, None)
+			elif cmd == "place":
+				if len(parts) < 4:
+					print("Usage: place SYMBOL SIDE QTY [PRICE]")
+				
+				else:
+					sym = parts[1].upper()
+					side = parts[2].lower()
+					qty = int(parts[3])
+					px = float(parts[4]) if len(parts) > 4 else None
+					order = {
+						"symbol": sym,
+						"side": side,
+						"order_type": "limit" if px is not None else "market",
+						"quantity": qty,
+					}
+					
+					if px is not None:
+						order["price"] = px
+
+					submit_net(place_order, api_url, api_key, order)
+			
+			elif cmd == "setweight":
+				if len(parts) < 2:
+					print("Usage: setweight VALUE")
+
+				else:
+					v = float(parts[1])
+					globals()["unique_weight"] = v
+					print(f"Set unique_weight = {v}")
+			
+			else:
+				print("Unknown command. Type 'help' for commands.")
+
+		except Exception as e:
+			print(f"[ERR] Command failed: {e}")
+
+		return True
+
+	try:
+		while True:
+			# drain queue
+			while True:
+				try:
+					line = cmd_q.get_nowait()
+				except queue.Empty:
+					break
+
+				cont = handle_command(line)
+				if not cont:
+					stop_event.set()
+					executor.shutdown(wait=True)
+					return
+
+			# normal market-making work
+			update_fair_values(fair, drift_std=0.3)
+
+			for sym in symbols:
+				fair_value = fair[sym]
+				orders = make_bid_ask_orders(sym, fair_value)
+				for o in orders:
+					print(f"current order: {o}")
+					created = place_order(api_url, api_key, o)
+					if created:
+						order_id = created.get("order_id") or created.get("id")
+						if order_id:
+							submit_net(cancel_order, api_url, api_key, order_id)
+						else:
+							print("[ERR] place_order returned no order_id, cannot cancel")
+					else:
+						print("[ERR] place_order failed, skipping cancel")
+
+				print(f"[{sym}] fair={fair_value:.2f}\n")
+				time.sleep(0.5)
+
+			if not loop:
+				break
+
+			time.sleep(1)
+
+	finally:
+		if print_manager is not None:
+			builtins.print = print_manager.original_print
+		stop_event.set()
+		executor.shutdown(wait=False)
+		time.sleep(0.1)
+
+class PrintManager:
+	"""
+	Buffers print output while input is active, then flushes after input completes.
+	Replaces builtins.print during the market loop.
+	"""
+	def __init__(self):
+		self.original_print = builtins.print
+		self.lock = threading.Lock()
+		self.input_active = False
+		self.buffer: List[str] = []
+
+	def set_input_active(self, active: bool) -> None:
+		with self.lock:
+			# when turning input off, flush buffered lines
+			self.input_active = active
+			if not self.input_active and self.buffer:
+				for line in self.buffer:
+					self.original_print(line)
+                              
+				self.buffer.clear()
+
+	def print(self, *args, **kwargs) -> None:
+		sep = kwargs.get("sep", " ")
+		end = kwargs.get("end", "\n")
+		flush = kwargs.get("flush", False)
+		msg = sep.join(str(a) for a in args) + end
+
+		with self.lock:
+			if self.input_active:
+				# buffer entire message (including trailing newline)
+				self.buffer.append(msg.rstrip("\n"))
+				return
+                  
+			# not in input, go straight to original print
+			self.original_print(*args, sep=sep, end=end, flush=flush)
+
+print_manager: PrintManager | None = None
 
 # ----------------------------
 # Entry point
@@ -291,7 +496,6 @@ def parse_args():
     parser.add_argument("--loop", action="store_true", help="Continuously place orders")
     return parser.parse_args()
 
-
 def main():
     args = parse_args()
     api_key = args.api_key or input("Enter API key: ").strip()
@@ -302,7 +506,6 @@ def main():
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     market_making_loop(args.api_url, api_key, symbols, loop=args.loop)
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
