@@ -48,7 +48,7 @@ def api_post(base_url: str, path: str, api_key: str, body: dict[str, Any]) -> An
     return resp.json()
 
 
-def place_order(api_url: str, api_key: str, order: dict[str, Any]) -> None:
+def place_order(api_url: str, api_key: str, order: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Send a single order to the API."""
     try:
         res = api_post(api_url, "/api/v1/orders", api_key, order)
@@ -56,8 +56,10 @@ def place_order(api_url: str, api_key: str, order: dict[str, Any]) -> None:
             f"[OK] {order['side'].upper():4} {order['symbol']:5} "
             f"{order['quantity']:>3} @ {order.get('price', 'MKT')} ({order['order_type']})"
         )
+        return res
     except Exception as e:
         print(f"[ERR] Failed order for {order['symbol']}: {e}")
+        return None
 
 def list_symbols(base_url: str, api_key: str) -> None:
     data = api_get(base_url, "/api/v1/symbols", api_key)
@@ -87,13 +89,84 @@ def list_open_orders(base_url: str, api_key: str, symbol: Optional[str] = None) 
 
 def cancel_order(base_url: str, api_key: str, order: dict[str, Any]) -> None:
     """
-    """
-    pass
+    Input:
+        base_url: `str` object representing the base API url
 
-def cancel_all_orders(base_url: str, api_key: str) -> None:
+        api_key: `str` object representing the API key
+
+        order: `dict` object representing a single order's data
+
+    Output:
+        None
+
+    Cancel a single order.
     """
+    # normalize order_id
+    if isinstance(order, (str, int)):
+        order_id = str(order)
+
+    elif isinstance(order, dict):
+        order_id = str(order.get("order_id") or order.get("id") or "")
+
+    else:
+        print("[ERR] Invalid order parameter")
+        return
+
+    if not order_id:
+        print("[ERR] Couldn't determine order_id")
+        return
+
+    url = f"{base_url}/api/v1/orders/{order_id}"
+    try:
+        resp = requests.delete(url, headers=build_headers(api_key), timeout=10)
+        _raise_for_api_error(resp)
+        print(f"[OK] Canceled {order_id}")
+
+    except Exception as e:
+        print(f"[ERR] Failed to cancel {order_id}, {e}")
+
+def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) -> None:
     """
-    pass
+    Input:
+        base_url: `str` object representing the base API url
+
+        api_key: `str` object representing the API key
+
+        symbols: `list` object containing `str` objects representing the symbols to cancel all orders for 
+
+    Output:
+        None
+    
+    Cancel all orders across all equities or all orders for a single equity symbol.
+    """
+    # priv cancel function for readability sake
+    def _cancel_list(orders: list[dict[str, Any]]) -> None:
+        if not orders:
+            return
+        
+        for order in orders:
+            cancel_order(base_url, api_key, order)
+            time.sleep(0.05)
+
+    if symbols: # iterate thru symbols to cancel if given
+        for symbol in symbols:
+            try:
+                data = api_get(base_url, "/api/v1/orders/open", api_key, params={"symbol": symbol})
+
+            except Exception as e:
+                print(f"[ERR] Failed to list open orders for {symbol}, {e}")
+                continue
+
+            _cancel_list(data.get("orders", []))
+    else:
+        try:
+            data = api_get(base_url, "/api/v1/orders/open", api_key)
+
+        except Exception as e:
+            print(f"[ERR] Failed to list open orders, {e}")
+            return
+        
+        _cancel_list(data.get("orders", []))
 
 # ----------------------------
 # Market-making logic
@@ -195,7 +268,9 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
             fair_value = fair[sym]
             orders = make_bid_ask_orders(sym, fair_value)
             for o in orders:
-                place_order(api_url, api_key, o)
+                print(f"current order: {o}")
+                created = place_order(api_url, api_key, o)
+                cancel_order(api_url, api_key, created.get("order_id"))
             print(f"[{sym}] fair={fair_value:.2f}\n")
             time.sleep(0.5)
 
