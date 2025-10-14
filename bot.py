@@ -275,13 +275,13 @@ def update_ETF_fair(fair_values: dict[str, float]) -> float:
     fair_ETF = int()
     for symbol, value in fair_values.items():
         if symbol == "AAA":
-            fair_ETF += value * unique_weight
+            fair_ETF += value * unique_weight_aaa
 
         elif symbol == "BBB":
-            fair_ETF += value * unique_weight
+            fair_ETF += value * unique_weight_bbb
             
         elif symbol == "CCC":
-            fair_ETF += value * unique_weight
+            fair_ETF += value * unique_weight_ccc
 
     return fair_ETF
 
@@ -321,6 +321,10 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 	print_manager = PrintManager()
 	builtins.print = print_manager.print
 
+	globals()["unique_weight_aaa"] = globals().get("unique_weight_aaa", 1.0)
+	globals()["unique_weight_bbb"] = globals().get("unique_weight_bbb", 1.0)
+	globals()["unique_weight_ccc"] = globals().get("unique_weight_ccc", 1.0)
+
 	fair = generate_fair_values(symbols)
 	print("Initial fair values:", fair)
 
@@ -339,7 +343,6 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 	def handle_command(line: str) -> bool:
 		"""
 		Supported commands:
-		  - help
 		  - exit
 		  - list
 		  - list_open [SYMBOL]
@@ -347,20 +350,12 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 		  - cancel_all [SYMBOL]
 		  - place SYMBOL SIDE QTY [PRICE]
 		  - setweight VALUE
-
-		Return `True` to continue loop, `False` to stop.
 		"""
 		parts = line.split()
 		cmd = parts[0].lower()
 		try:
-			if cmd == "help":
-				print(
-					"commands: help, exit, list, list_open [SYMBOL], "
-					"cancel ORDER_ID, cancel_all [SYMBOL], place SYMBOL SIDE QTY [PRICE], setweight VALUE"
-				)
-
-			elif cmd == "exit":
-				print("Exiting on user request...")
+			if cmd == "exit":
+				print("exiting on user request")
 				return False
 			
 			elif cmd == "list":
@@ -408,15 +403,73 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 			
 			elif cmd == "setweight":
 				if len(parts) < 2:
-					print("Usage: setweight VALUE")
-
+					print("Usage: setweight VALUE | setweight SYMBOL VALUE | setweight SYMBOL=VAL[,SYMBOL=VAL...] | setweight all VALUE")
 				else:
-					v = float(parts[1])
-					globals()["unique_weight"] = v
-					print(f"Set unique_weight = {v}")
-			
-			else:
-				print("Unknown command. Type 'help' for commands.")
+					try:
+						arg = parts[1]
+						if "=" in arg or ("," in " ".join(parts[1:])):
+							s = " ".join(parts[1:])
+							pairs = [p.strip() for p in s.split(",") if p.strip()]
+
+							for p in pairs:
+								if "=" not in p:
+									raise ValueError(f"bad pair: {p}")
+								
+								sym, val = p.split("=", 1)
+								sym = sym.strip().upper()
+								v = float(val)
+								if sym == "AAA":
+									globals()["unique_weight_aaa"] = v
+
+								elif sym == "BBB":
+									globals()["unique_weight_bbb"] = v
+
+								elif sym == "CCC":
+									globals()["unique_weight_ccc"] = v
+
+								else:
+									print(f"Ignoring unknown symbol: {sym}")
+
+							print("Weights:", {
+								"AAA": globals()["unique_weight_aaa"],
+								"BBB": globals()["unique_weight_bbb"],
+								"CCC": globals()["unique_weight_ccc"],
+							})
+
+						elif arg.lower() == "all":
+							if len(parts) < 3:
+								print("Usage: setweight all VALUE")
+
+							else:
+								v = float(parts[2])
+								globals()["unique_weight_aaa"] = globals()["unique_weight_bbb"] = globals()["unique_weight_ccc"] = v
+								print(f"Set all weights = {v}")
+								
+						elif len(parts) >= 3 and parts[1].isalpha():
+							sym = parts[1].upper()
+							v = float(parts[2])
+
+							if sym == "AAA":
+								globals()["unique_weight_aaa"] = v
+
+							elif sym == "BBB":
+								globals()["unique_weight_bbb"] = v
+
+							elif sym == "CCC":
+								globals()["unique_weight_ccc"] = v
+
+							else:
+								print(f"Unknown symbol: {sym}")
+
+							print(f"Set {sym} weight = {v}")
+
+						else:
+							v = float(arg)
+							globals()["unique_weight_aaa"] = globals()["unique_weight_bbb"] = globals()["unique_weight_ccc"] = v
+							print(f"Set all weights = {v}")
+							
+					except Exception as e:
+						print(f"[ERR] setweight failed: {e}")
 
 		except Exception as e:
 			print(f"[ERR] Command failed: {e}")
