@@ -4,9 +4,10 @@ import time
 import json
 import argparse
 import random
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import requests
 
+import threading
 
 # ----------------------------
 # Helpers
@@ -84,11 +85,21 @@ def list_open_orders(base_url: str, api_key: str, symbol: Optional[str] = None) 
             f"  - {o['order_id']} | {o['symbol']} {o['side']} {o['quantity']} {o['order_type']}{price_str} | {o['status']}"
         )
 
+def cancel_order(base_url: str, api_key: str, order: dict[str, Any]) -> None:
+    """
+    """
+    pass
+
+def cancel_all_orders(base_url: str, api_key: str) -> None:
+    """
+    """
+    pass
 
 # ----------------------------
 # Market-making logic
 # ----------------------------
 def generate_fair_values(symbols: list[str]) -> dict[str, float]:
+    ### Needs to be updated
     fair = {}
     for s in symbols:
         fair[s] = round(random.uniform(90, 250), 2)
@@ -96,10 +107,10 @@ def generate_fair_values(symbols: list[str]) -> dict[str, float]:
 
 
 def update_fair_values(fair: dict[str, float], drift_std: float = 0.5) -> None:
+    ### Needs to be updated
     for s in fair:
         fair[s] += random.gauss(0, drift_std)
         fair[s] = round(fair[s], 2)
-
 
 def make_bid_ask_orders(symbol: str, fair_value: float) -> list[dict[str, Any]]:
     spread = random.uniform(0.1, 0.6)
@@ -113,6 +124,57 @@ def make_bid_ask_orders(symbol: str, fair_value: float) -> list[dict[str, Any]]:
         {"symbol": symbol, "side": "sell", "order_type": "limit", "quantity": qty, "price": ask_px},
     ]
 
+def update_ETF_fair(fair_values: dict[str, float]) -> float:
+    """
+    Input:
+        fair_values: `dictionary` object w/ keys of type `str` and values of 
+                     type `float` representing equity symbols and their values
+
+    Output:
+        fair_ETF: `float` object representing the current fair value of the ETF
+
+    Takes in the current fair values for every symbol and weighs the values then 
+    returns the sum of the new weighted values.
+    """
+    fair_ETF = int()
+    for symbol, value in fair_values.items():
+        if symbol == "AAA":
+            fair_ETF += value * unique_weight
+
+        elif symbol == "BBB":
+            fair_ETF += value * unique_weight
+            
+        elif symbol == "CCC":
+            fair_ETF += value * unique_weight
+
+    return fair_ETF
+
+def check_ETF_discrepancy(expected_ETF_value: float, actual_ETF_value: float, spread: float) -> Union[tuple[str], None]:
+    """
+    Input:
+        expected_ETF_value: `float` object representing the calculated, expected 
+                            ETF equity value
+
+        actual_ETF_value: `float` object representing the actual, reported ETF equity value
+
+        spread: user-inputted `float` object representing threshold for 
+                significant discrepancy
+    
+    Output:
+        discrepancy: `tuple` object with single `str` object or type `None` representing
+                     either a signal and, if so, what type of signal or no signal
+    
+    Checks for significant discrepancy between expected_ETF_value and the actual_ETF_value,
+    signalling for a long or short order on the ETF equity.
+    """
+    diff = expected_ETF_value - actual_ETF_value
+    if abs(diff) > spread:
+        if diff > 0:
+            return ("long",)
+        elif diff < 0:
+            return ("short",)
+    else:
+        return None
 
 # ----------------------------
 # Main trading loop
@@ -122,7 +184,13 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
     print("Initial fair values:", fair)
 
     while True:
+        # figure a way to queue terminal input?
         update_fair_values(fair, drift_std=0.3)
+        # if (discrepancy := check_ETF_discrepancy()):
+        #   if discrepancy[0] == "long":
+        #       execute_order()
+        #   else:
+        #       execute_different_order()
         for sym in symbols:
             fair_value = fair[sym]
             orders = make_bid_ask_orders(sym, fair_value)
