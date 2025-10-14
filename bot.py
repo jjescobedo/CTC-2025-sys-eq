@@ -175,11 +175,10 @@ def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) ->
 
 def input_worker(q: "queue.Queue[str]", stop_event: "threading.Event") -> None:
 	"""
-	Wait for stdin activity. If user presses Enter on an empty line -> open an explicit prompt:
-	  - enable print buffering (so background prints don't disrupt typing)
-	  - show prompt with original_print (so prompt isn't buffered)
-	  - read the command line, disable buffering, flush and queue command
-	If user types a non-empty line and hits Enter, treat it directly as a command.
+	Waits for stdin activity. If user presses enter on an empty line -> open an explicit prompt which
+	enables print buffering, so background prints don't disrupt typing.
+	
+	If user types a non-empty line and hits enter, treat it directly as a command.
 	"""
 	while not stop_event.is_set():
 		try:
@@ -191,11 +190,9 @@ def input_worker(q: "queue.Queue[str]", stop_event: "threading.Event") -> None:
 			# read the available line (this consumes the newline)
 			line = sys.stdin.readline()
 			if line == "":
-				# EOF
 				q.put("exit")
 				break
 
-			# If user hit Enter without typing -> open interactive prompt
 			if line.strip() == "":
 				pm = globals().get("print_manager")
 				if pm is not None:
@@ -205,13 +202,11 @@ def input_worker(q: "queue.Queue[str]", stop_event: "threading.Event") -> None:
 				if pm is not None:
 					pm.original_print("> ", end="", flush=True)
 				else:
-					# fallback
 					builtins.print("> ", end="", flush=True)
 
 				# read actual command (user types here)
 				cmd = sys.stdin.readline()
 				if cmd == "":
-					# EOF while in prompt
 					if pm is not None:
 						pm.set_input_active(False)
 					q.put("exit")
@@ -343,8 +338,6 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 	
 	def handle_command(line: str) -> bool:
 		"""
-		Press enter in terminal during runtime to activate cursor, to type command
-		
 		Supported commands:
 		  - help
 		  - exit
