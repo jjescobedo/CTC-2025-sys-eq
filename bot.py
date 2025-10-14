@@ -4,14 +4,13 @@ import time
 import json
 import argparse
 import random
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, List
 import requests
 
 import threading
 import queue
 import concurrent.futures
 import builtins
-from typing import List
 
 # ----------------------------
 # Helpers
@@ -174,6 +173,7 @@ def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) ->
 
 def input_worker(q: "queue.Queue[str]", stop_event: "threading.Event") -> None:
 	"""
+    text
 	"""
 	while not stop_event.is_set():
 		try:
