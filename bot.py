@@ -18,9 +18,11 @@ import select
 # Helpers
 # ----------------------------
 def build_headers(api_key: str) -> dict[str, str]:
+	# given
     return {"X-API-Key": api_key, "Content-Type": "application/json"}
 
 def _raise_for_api_error(resp: requests.Response) -> None:
+	# given
     if 200 <= resp.status_code < 300:
         return
     try:
@@ -35,6 +37,7 @@ def _raise_for_api_error(resp: requests.Response) -> None:
 
 
 def api_get(base_url: str, path: str, api_key: str, params: Optional[dict[str, Any]] = None) -> Any:
+	# given 
     url = f"{base_url}{path}"
     resp = requests.get(url, headers=build_headers(api_key), params=params, timeout=15)
     _raise_for_api_error(resp)
@@ -42,6 +45,7 @@ def api_get(base_url: str, path: str, api_key: str, params: Optional[dict[str, A
 
 
 def api_post(base_url: str, path: str, api_key: str, body: dict[str, Any]) -> Any:
+	# given
     url = f"{base_url}{path}"
     resp = requests.post(url, headers=build_headers(api_key), data=json.dumps(body), timeout=10)
     if not (200 <= resp.status_code < 300):
@@ -54,6 +58,7 @@ def api_post(base_url: str, path: str, api_key: str, body: dict[str, Any]) -> An
 
 
 def place_order(api_url: str, api_key: str, order: dict[str, Any]) -> Optional[dict[str, Any]]:
+	# given
     """Send a single order to the API."""
     try:
         res = api_post(api_url, "/api/v1/orders", api_key, order)
@@ -67,6 +72,7 @@ def place_order(api_url: str, api_key: str, order: dict[str, Any]) -> Optional[d
         return None
 
 def list_symbols(base_url: str, api_key: str) -> None:
+	# given
     data = api_get(base_url, "/api/v1/symbols", api_key)
     symbols = data.get("symbols", [])
     if not symbols:
@@ -77,6 +83,7 @@ def list_symbols(base_url: str, api_key: str) -> None:
         print(f"  - {row.get('symbol')}\t{row.get('name')}")
 
 def list_open_orders(base_url: str, api_key: str, symbol: Optional[str] = None) -> None:
+	# given
     params: dict[str, Any] = {}
     if symbol:
         params["symbol"] = symbol
@@ -144,7 +151,6 @@ def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) ->
     
     Cancel all orders across all equities or all orders for a single equity symbol.
     """
-    # priv cancel function for readability sake
     def _cancel_list(orders: list[dict[str, Any]]) -> None:
         if not orders:
             return
@@ -239,6 +245,7 @@ def generate_fair_values(symbols: list[str]) -> dict[str, float]:
     fair = {}
     for s in symbols:
         fair[s] = round(random.uniform(90, 250), 2)
+		
     return fair
 
 
@@ -249,6 +256,7 @@ def update_fair_values(fair: dict[str, float], drift_std: float = 0.5) -> None:
         fair[s] = round(fair[s], 2)
 
 def make_bid_ask_orders(symbol: str, fair_value: float) -> list[dict[str, Any]]:
+	# given
     spread = random.uniform(0.1, 0.6)
     qty = random.randint(25, 50)
 
@@ -262,31 +270,34 @@ def make_bid_ask_orders(symbol: str, fair_value: float) -> list[dict[str, Any]]:
 
 def update_ETF_fair(fair_values: dict[str, float]) -> float:
     """
+    Takes in the current fair values for every symbol and weighs the values then 
+    returns the sum of the new weighted values.
+
     Input:
         fair_values: `dictionary` object w/ keys of type `str` and values of 
                      type `float` representing equity symbols and their values
 
     Output:
         fair_ETF: `float` object representing the current fair value of the ETF
-
-    Takes in the current fair values for every symbol and weighs the values then 
-    returns the sum of the new weighted values.
     """
     fair_ETF = int()
     for symbol, value in fair_values.items():
         if symbol == "AAA":
-            fair_ETF += value * unique_weight_aaa
+            fair_ETF += value * globals()["unique_weight_aaa"]
 
         elif symbol == "BBB":
-            fair_ETF += value * unique_weight_bbb
+            fair_ETF += value * globals()["unique_weight_bbb"]
             
         elif symbol == "CCC":
-            fair_ETF += value * unique_weight_ccc
+            fair_ETF += value * globals()["unique_weight_ccc"]
 
     return fair_ETF
 
 def check_ETF_discrepancy(expected_ETF_value: float, actual_ETF_value: float, spread: float) -> Union[tuple[str], None]:
     """
+    Checks for significant discrepancy between expected_ETF_value and the actual_ETF_value,
+    signalling for a long or short order on the ETF equity.
+
     Input:
         expected_ETF_value: `float` object representing the calculated, expected 
                             ETF equity value
@@ -299,9 +310,6 @@ def check_ETF_discrepancy(expected_ETF_value: float, actual_ETF_value: float, sp
     Output:
         discrepancy: `tuple` object with single `str` object or type `None` representing
                      either a signal and, if so, what type of signal or no signal
-    
-    Checks for significant discrepancy between expected_ETF_value and the actual_ETF_value,
-    signalling for a long or short order on the ETF equity.
     """
     diff = expected_ETF_value - actual_ETF_value
     if abs(diff) > spread:
@@ -342,14 +350,14 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 	
 	def handle_command(line: str) -> bool:
 		"""
-		Supported commands:
+		Commands:
 		  - exit
 		  - list
 		  - list_open [SYMBOL]
 		  - cancel ORDER_ID
 		  - cancel_all [SYMBOL]
 		  - place SYMBOL SIDE QTY [PRICE]
-		  - setweight VALUE
+		  - setweight SYMBOL=VAL[,SYMBOL=VAL...]
 		"""
 		parts = line.split()
 		cmd = parts[0].lower()
@@ -380,6 +388,7 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 				
 				else:
 					submit_net(cancel_all_orders, api_url, api_key, None)
+
 			elif cmd == "place":
 				if len(parts) < 4:
 					print("Usage: place SYMBOL SIDE QTY [PRICE]")
@@ -403,7 +412,8 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 			
 			elif cmd == "setweight":
 				if len(parts) < 2:
-					print("Usage: setweight VALUE | setweight SYMBOL VALUE | setweight SYMBOL=VAL[,SYMBOL=VAL...] | setweight all VALUE")
+					print("Usage: setweight SYMBOL=VAL[,SYMBOL=VAL...] | setweight all VALUE")
+
 				else:
 					try:
 						arg = parts[1]
@@ -467,7 +477,7 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 							v = float(arg)
 							globals()["unique_weight_aaa"] = globals()["unique_weight_bbb"] = globals()["unique_weight_ccc"] = v
 							print(f"Set all weights = {v}")
-							
+
 					except Exception as e:
 						print(f"[ERR] setweight failed: {e}")
 
@@ -493,6 +503,9 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 
 			# normal market-making work
 			update_fair_values(fair, drift_std=0.3)
+
+			if check_ETF_discrepancy():
+				pass
 
 			for sym in symbols:
 				fair_value = fair[sym]
