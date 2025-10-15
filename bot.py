@@ -13,6 +13,7 @@ import concurrent.futures
 import builtins
 import sys
 import select
+import numpy as np
 
 # ----------------------------
 # Helpers
@@ -101,6 +102,8 @@ def list_open_orders(base_url: str, api_key: str, symbol: Optional[str] = None) 
 
 def cancel_order(base_url: str, api_key: str, order: dict[str, Any]) -> None:
     """
+    Cancel a single order.
+	
     Input:
         base_url: `str` object representing the base API url
 
@@ -110,8 +113,6 @@ def cancel_order(base_url: str, api_key: str, order: dict[str, Any]) -> None:
 
     Output:
         None
-
-    Cancel a single order.
     """
     # normalize order_id
     if isinstance(order, (str, int)):
@@ -139,6 +140,8 @@ def cancel_order(base_url: str, api_key: str, order: dict[str, Any]) -> None:
 
 def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) -> None:
     """
+    Cancel all orders across all equities or all orders for a single equity symbol.
+	
     Input:
         base_url: `str` object representing the base API url
 
@@ -148,8 +151,6 @@ def cancel_all_orders(base_url: str, api_key: str, symbols: list[str] = None) ->
 
     Output:
         None
-    
-    Cancel all orders across all equities or all orders for a single equity symbol.
     """
     def _cancel_list(orders: list[dict[str, Any]]) -> None:
         if not orders:
@@ -317,6 +318,7 @@ def check_ETF_discrepancy(expected_ETF_value: float, actual_ETF_value: float, sp
             return ("long",)
         elif diff < 0:
             return ("short",)
+		
     else:
         return None
 
@@ -503,8 +505,9 @@ def market_making_loop(api_url: str, api_key: str, symbols: list[str], loop: boo
 
 			# normal market-making work
 			update_fair_values(fair, drift_std=0.3)
+			fair_ETF = update_ETF_fair(fair)
 
-			if check_ETF_discrepancy():
+			if check_ETF_discrepancy(fair_ETF, np.mean([price for price in api_get(market.get_orders("ETF").value)])):
 				pass
 
 			for sym in symbols:
